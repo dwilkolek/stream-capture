@@ -18,5 +18,8 @@ ENV CRON=$cron
 ARG rec_timeout
 ENV REC_TIMEOUT=$rec_timeout
 
+ARG ftp
+ENV FTP=$ftp
+
 CMD ["./app"]
 

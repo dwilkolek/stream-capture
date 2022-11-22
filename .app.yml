@@ -6,3 +6,4 @@ env_variables:
   STREAM_URL: "https://stream-url"
   CRON: "0 55 14 * * *"
   REC_TIMEOUT: "900"
+  FTP: "user:password@domain/path/x/y/z"
