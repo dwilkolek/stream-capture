@@ -136,12 +136,14 @@ func (captureJob CaptureJob) sendToFtp(sourceFile string) {
 	success := false
 	c, err := ftp.Dial(captureJob.ftp_location.host+":21", ftp.DialWithTimeout(5*time.Second))
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		return
 	}
 
 	err = c.Login(captureJob.ftp_location.user, captureJob.ftp_location.pass)
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		return
 	}
 
 	dirs := strings.Split(captureJob.ftp_location.path, "/")
@@ -162,17 +164,20 @@ func (captureJob CaptureJob) sendToFtp(sourceFile string) {
 	_, filename := filepath.Split(sourceFile)
 	file, err := os.Open(sourceFile)
 	if err != nil {
-		panic(err)
+		log.Println(err)
+		return
 	}
 
 	reader := bufio.NewReader(file)
 	err = c.Stor(filename, reader)
 	if err != nil {
-		panic(err)
+		log.Println(err)
+		return
 	}
 	success = true
 	if err := c.Quit(); err != nil {
-		log.Fatal(err)
+		log.Println(err)
+		return
 	}
 	log.Printf("Sendout done: %s", sourceFile)
 

@@ -19,5 +19,5 @@ gcloud app deploy --image-url=gcr.io/stream-capture/stream-capture --stop-previo
 # Running
 
 ```
-docker run -p 8080:8080 --env "STREAM_URL=https://some-url" --env "CRON=0 14 55 * * *" --env "REC_TIMEOUT=900" gcr.io/stream-capture/stream-capture
+docker run -p 8080:8080 --env "STREAM_URL=https://some-url" --env "CRON=0 14 55 * * *" --env "REC_TIMEOUT=900" gcr.io/stream-capture/stream-capture --env "FTP=user:password@domain/path/x/y/z"
 ```
