@@ -20,7 +20,7 @@ import (
 
 func main() {
 	fmt.Println("Current date and time is: ", time.Now())
-	_ = os.Mkdir("out", os.ModePerm)
+	_ = os.Mkdir("/tmp/store", os.ModePerm)
 	go setupCron()
 	server()
 }
@@ -32,7 +32,7 @@ func server() {
 		port = "8080"
 		log.Printf("defaulting to port %s", port)
 	}
-	handler := http.FileServer(http.Dir("out"))
+	handler := http.FileServer(http.Dir("/tmp/store"))
 	err := http.ListenAndServe(":"+port, handler)
 	fmt.Println(err)
 }
@@ -117,11 +117,12 @@ func (captureJob CaptureJob) process() {
 		log.Panicf("Failed to read timeout %s", captureJob.rec_timeout)
 	}
 	context_timeout := time.Duration(timeout+30) * time.Second
-	outputFile := filepath.Join("out", fmt.Sprintf("%s.mp3", filename))
+	outputFile := filepath.Join("/tmp/store", fmt.Sprintf("%s.mp3", filename))
 	log.Printf("Capture to file:: %s", outputFile)
 
 	context, _ := context.WithTimeout(context.Background(), context_timeout)
 	cmd := exec.CommandContext(context, captureJob.ffmpegPath, "-i", captureJob.streamUrl, "-t", captureJob.rec_timeout, outputFile, "-y")
+
 	log.Printf("Executing: %s\n", cmd.String())
 	err = cmd.Run()
 	if err != nil {
