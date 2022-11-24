@@ -1,8 +1,9 @@
-package main
+package lambda
 
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,140 +15,109 @@ import (
 	"strings"
 	"time"
 
+	"github.com/GoogleCloudPlatform/functions-framework-go/functions"
 	"github.com/jlaffaye/ftp"
-	"github.com/robfig/cron/v3"
 )
 
-func main() {
-	fmt.Println("Current date and time is: ", time.Now())
-	_ = os.Mkdir("/tmp/store", os.ModePerm)
-	go setupCron()
-	server()
+var FFMPEG_PATH string = "ffmpeg"
+
+func init() {
+	functions.HTTP("TriggerCapture", triggerCapture)
 }
 
-func server() {
-
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-		log.Printf("defaulting to port %s", port)
+func triggerCapture(w http.ResponseWriter, req *http.Request) {
+	decoder := json.NewDecoder(req.Body)
+	var triggerCapture TriggerCapture
+	err := decoder.Decode(&triggerCapture)
+	if err != nil {
+		panic(err)
 	}
-	handler := http.FileServer(http.Dir("/tmp/store"))
-	err := http.ListenAndServe(":"+port, handler)
-	fmt.Println(err)
+
+	storeHandler := storeLocation(triggerCapture.StoreLocation)
+	job := CaptureJob{
+		streamUrl:    triggerCapture.StreamUrl,
+		recTimeout:   triggerCapture.RecTimeout,
+		storeHandler: storeHandler,
+	}
+	job.process()
 }
 
-func setupCron() {
-	ffmpegPath := os.Getenv("FFMPEG")
-	if ffmpegPath == "" {
-		ffmpegPath = os.Args[1]
-		log.Printf("using ffmpeg from arg: %s\n", ffmpegPath)
+func storeLocation(storeLocationString string) StrorageHandler {
+	ftpReg := regexp.MustCompile(`ftp://(.*)\:(.*)@([A-Z\.\-a-z]+)(/.*)`)
+	matches := ftpReg.FindStringSubmatch(storeLocationString)
+	if len(matches) == 5 {
+		return FtpStorage{
+			User: matches[1],
+			Pass: matches[2],
+			Host: matches[3],
+			Path: matches[4],
+		}
 	}
+	panic("Cannot process storeLocation")
 
-	streamUrl := os.Getenv("STREAM_URL")
-	if streamUrl == "" {
-		streamUrl = os.Args[2]
-		log.Printf("using streamUrl from arg: %s\n", streamUrl)
-	}
-
-	cronString := os.Getenv("CRON")
-	if cronString == "" {
-		cronString = os.Args[3]
-		log.Printf("using cron from arg: %s\n", cronString)
-	}
-
-	rec_timeout := os.Getenv("REC_TIMEOUT")
-	if rec_timeout == "" {
-		rec_timeout = os.Args[4]
-		log.Printf("using timeout from arg: %s\n", rec_timeout)
-	}
-
-	ftp_location_str := os.Getenv("FTP")
-	if ftp_location_str == "" {
-		ftp_location_str = os.Args[5]
-		log.Printf("using ftpLocation from args\n")
-	}
-
-	ftp_location := parseFtpString(ftp_location_str)
-	fmt.Printf("Cron setup\nFfmpeg: %s\nStream: %s\nCron: %s\nRecording timeout:%s\nFtp: %s\n", ffmpegPath, streamUrl, cronString, rec_timeout, ftp_location.host+ftp_location.path)
-	cron := cron.New(cron.WithSeconds())
-	cron.AddJob(cronString, CaptureJob{
-		ffmpegPath:   ffmpegPath,
-		streamUrl:    streamUrl,
-		rec_timeout:  rec_timeout,
-		ftp_location: ftp_location,
-	})
-	cron.Start()
-
-	fmt.Printf("DONE.\n\n")
 }
 
-func parseFtpString(ftpString string) FtpLocation {
-	ftpReg := regexp.MustCompile(`(.*)\:(.*)@([A-Z\.\-a-z]+)(/.*)`)
-	matches := ftpReg.FindStringSubmatch(ftpString)
-	return FtpLocation{
-		user: matches[1],
-		pass: matches[2],
-		host: matches[3],
-		path: matches[4],
-	}
+type FtpStorage struct {
+	Host string
+	User string
+	Pass string
+	Path string
 }
 
-type FtpLocation struct {
-	host string
-	user string
-	pass string
-	path string
+type TriggerCapture struct {
+	StreamUrl     string `json:"streamUrl"`
+	RecTimeout    string `json:"recTimeout"`
+	StoreLocation string `json:"storeLocation"`
 }
+
 type CaptureJob struct {
-	ffmpegPath   string
 	streamUrl    string
-	rec_timeout  string
-	ftp_location FtpLocation
+	recTimeout   string
+	storeHandler StrorageHandler
 }
 
-func (captureJob CaptureJob) Run() {
-	captureJob.process()
+type StrorageHandler interface {
+	store(string)
 }
+
 func (captureJob CaptureJob) process() {
 	log.Println("Capture started")
-	timeout, err := strconv.Atoi(captureJob.rec_timeout)
-	filename := time.Now().Format("2006-01-02T15-04-05") + "-" + captureJob.rec_timeout
+	timeout, err := strconv.Atoi(captureJob.recTimeout)
+	filename := time.Now().Format("2006-01-02T15-04-05") + "-" + captureJob.recTimeout
 	if err != nil {
-		log.Panicf("Failed to read timeout %s", captureJob.rec_timeout)
+		log.Panicf("Failed to read timeout %s", captureJob.recTimeout)
 	}
 	context_timeout := time.Duration(timeout+30) * time.Second
-	outputFile := filepath.Join("/tmp/store", fmt.Sprintf("%s.mp3", filename))
+	outputFile := filepath.Join(os.TempDir(), fmt.Sprintf("%s.mp3", filename))
 	log.Printf("Capture to file:: %s", outputFile)
 
 	context, _ := context.WithTimeout(context.Background(), context_timeout)
-	cmd := exec.CommandContext(context, captureJob.ffmpegPath, "-i", captureJob.streamUrl, "-t", captureJob.rec_timeout, outputFile, "-y")
+	cmd := exec.CommandContext(context, FFMPEG_PATH, "-i", captureJob.streamUrl, "-t", captureJob.recTimeout, outputFile, "-y")
 
 	log.Printf("Executing: %s\n", cmd.String())
 	err = cmd.Run()
 	if err != nil {
 		log.Println(err)
+		return
 	}
-	fmt.Println("Capture done")
-
-	captureJob.sendToFtp(outputFile)
+	log.Println("Capture done")
+	captureJob.storeHandler.store(outputFile)
 }
 
-func (captureJob CaptureJob) sendToFtp(sourceFile string) {
-	success := false
-	c, err := ftp.Dial(captureJob.ftp_location.host+":21", ftp.DialWithTimeout(5*time.Second))
+func (ftpStorage FtpStorage) store(sourceFile string) {
+	c, err := ftp.Dial(ftpStorage.Host+":21", ftp.DialWithTimeout(5*time.Second))
 	if err != nil {
 		log.Println(err)
 		return
 	}
 
-	err = c.Login(captureJob.ftp_location.user, captureJob.ftp_location.pass)
+	err = c.Login(ftpStorage.User, ftpStorage.Pass)
 	if err != nil {
 		log.Println(err)
 		return
 	}
 
-	dirs := strings.Split(captureJob.ftp_location.path, "/")
+	dirs := strings.Split(ftpStorage.Path, "/")
 	for _, dir := range dirs {
 		if dir == "" {
 			continue
@@ -175,7 +145,6 @@ func (captureJob CaptureJob) sendToFtp(sourceFile string) {
 		log.Println(err)
 		return
 	}
-	success = true
 	if err := c.Quit(); err != nil {
 		log.Println(err)
 		return
@@ -183,15 +152,5 @@ func (captureJob CaptureJob) sendToFtp(sourceFile string) {
 	log.Printf("Sendout done: %s", sourceFile)
 
 	defer file.Close()
-	defer func() {
-		if success {
-			go func() {
-				log.Printf("Removing file: %s", sourceFile)
-				e := os.Remove(sourceFile)
-				if e != nil {
-					log.Println("Failed to delete file", e)
-				}
-			}()
-		}
-	}()
+	defer os.Remove(sourceFile)
 }

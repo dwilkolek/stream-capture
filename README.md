@@ -16,10 +16,16 @@ docker push gcr.io/stream-capture/stream-capture
 gcloud app deploy --image-url=gcr.io/stream-capture/stream-capture --stop-previous-version .\app.yml
 ```
 
-# Deploy to go116
+# Deploy to app engine
 
 ```
 gcloud app deploy --stop-previous-version .\app.yml
+```
+
+# Deploy to functions
+
+```
+gcloud functions deploy stream-capture-function  --gen2 --runtime=go116  --region=europe-west1 --source=. --entry-point=TriggerCapture --trigger-http --allow-unauthenticated
 ```
 
 # Running

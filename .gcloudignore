@@ -21,3 +21,8 @@ out
 src/
 cache/
 .cache/
+.app_docker.yml
+.app_go116.yml
+app_docker.yml
+app_go116.yml
+README.md
